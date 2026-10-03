@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"io"
 	"github.com/convin/webhook-ingest/internal/ingest"
+	"time"
+	"github.com/convin/webhook-ingest/internal/store"
 	// "github.com/convin/webhook-ingest/internal/redisclient"
 	"github.com/convin/webhook-ingest/internal/stats"
 	"github.com/convin/webhook-ingest/internal/testutil"
@@ -103,5 +105,79 @@ func TestStatsSurviveServiceRestart (t *testing.T) {
 	if got.CallCount != 1 {
 		t.Fatalf("got call count %d after restart, want 1", got.CallCount)
 	}
+
+}
+
+func TestPendingRecordingIsRecoveredAfterRestart(t *testing.T) {
+	srv, st := testutil.NewServer(t)
+	defer srv.Close()
+
+	eventID, callID, accountID := testutil.IDs(t, st)
+	evt := store.Event{
+		EventID: eventID,
+		CallID: callID,
+		AccountID: accountID,
+		Status: "completed",
+		DurationSec: 10,
+		RecordingURL: "https://example.com/a.wav",
+		Payload: []byte(`{}`),
+	}
+	if _, err := st.IngestEvent(context.Background(), evt);  err != nil{ 
+		t.Fatal(err)
+	}
+	var processed bool 
+	err := st.Pool().QueryRow(
+		context.Background(),
+		`SELECT recording_processed FROM calls WHERE call_id = $1`,
+		callID,
+	).Scan(&processed)
+
+	if err != nil { 
+		t.Fatal(err)
+	}
+	if processed {
+		t.Fatal("recording should initially be unprocessed")
+	}
+	newCache := stats.NewCache() 
+	newSvc := ingest.New(
+		st, 
+		newCache, 
+		nil, 
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	var pending int 
+	err = st.Pool().QueryRow(
+		context.Background(),
+		`SELECT COUNT(*) FROM calls
+		WHERE recording_url IS NOT NULL 
+			AND recording_processed = FALSE`,
+	).Scan(&pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	if err := newSvc.RecoverPendingRecordings(context.Background()); err != nil { 
+		t.Fatal(err)
+	}
+	
+	_ = newSvc
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+
+	for time.Now().Before(deadline) {
+		err := st.Pool().QueryRow(
+			context.Background(), 
+			`SELECT recording_processed FROM calls WHERE call_id = $1`,
+			callID,
+		).Scan(&processed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if processed {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("recording was not recovered after service restart")
 
 }

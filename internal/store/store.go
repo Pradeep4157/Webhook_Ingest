@@ -157,3 +157,32 @@ func (s *Store) AccountStats(ctx context.Context, accountID string) (Stats, erro
 	}
 	return st, nil
 }
+
+func (s *Store) PendingRecordings(ctx context.Context) ([]Event, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT call_id, account_id, recording_url
+		FROM calls 
+		WHERE recording_url IS NOT NULL 
+			AND recording_processed = FALSE`)
+		
+	if err != nil { 
+		return nil, err
+	}
+	defer rows.Close() 
+	var recordings []Event 
+	for rows.Next() {
+		var rec Event 
+		if err := rows.Scan(
+			&rec.CallID, 
+			&rec.AccountID, 
+			&rec.RecordingURL, 
+		); err != nil { 
+			return nil, err
+		}
+		recordings = append(recordings, rec)
+	}
+	if err := rows.Err(); err != nil { 
+		return nil, err
+	}
+	return recordings, nil
+}

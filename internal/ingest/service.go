@@ -29,7 +29,7 @@ func New(s *store.Store, c *stats.Cache, rdb *redis.Client, log *slog.Logger) *S
 	return &Service{store: s, cache: c, rdb: rdb, log: log}
 }
 
-// Stats returns the cached totals for an account.
+// Stats returns durable totals for an account
 func (s *Service) Stats(accountID string) stats.AccountStats {
 	st, err := s.store.AccountStats(context.Background(), accountID)
 	if err != nil { 
@@ -95,4 +95,23 @@ func (s *Service) processRecording(ctx context.Context, rec store.Event) error {
 }
 func (s *Service) Wait() {
     s.wg.Wait()
+}
+
+func (s *Service) RecoverPendingRecordings(ctx context.Context) error {
+	recordings, err := s.store.PendingRecordings(ctx)
+	if err != nil {
+		return err
+	}
+	s.log.Info("pending recordings found", "count", len(recordings))
+	for _, rec := range recordings { 
+		s.log.Info("recovering recording", "call_id", rec.CallID)
+		if err := s.processRecording(ctx, rec); err != nil { 
+			s.log.Error(
+				"failed to recover recording",
+				"call_id", rec.CallID,
+				"error", err,
+			)
+		}
+	}
+	return nil
 }
