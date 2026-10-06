@@ -3,9 +3,9 @@ package store_test
 import (
 	"context"
 	"testing"
-
 	"github.com/convin/webhook-ingest/internal/store"
 	"github.com/convin/webhook-ingest/internal/testutil"
+	"sync"
 )
 
 func TestIngestEventThenExists(t *testing.T) {
@@ -101,4 +101,52 @@ func TestIngestEventThenMarkRecordingProcessed(t *testing.T) {
 	if !processed {
 		t.Fatal("expected recording_processed to be true")
 	}
+}
+
+func TestConcurrentPendingRecordingClaims(t *testing.T) {
+	srv, st := testutil.NewServer(t)
+	defer srv.Close()
+	_, callID, accountID := testutil.IDs(t, st)
+	evt := store.Event{
+		EventID: "event-claim-test",
+		CallID: callID,
+		AccountID: accountID,
+		Status: "completed",
+		DurationSec: 10, 
+		RecordingURL: "https://example.com/a.wav",
+		Payload: []byte(`{}`),
+	}
+	if _, err := st.IngestEvent(context.Background(), evt); err != nil {
+		t.Fatal(err)
+	}
+	// now i will create go routines to fetch this recording in db
+	var wg sync.WaitGroup
+	results := make(chan []store.Event, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			recordings, err := st.PendingRecordings(context.Background())
+			if err != nil {
+				t.Fatal(err)
+				return
+			}
+			results <- recordings
+
+		}()
+	}
+	wg.Wait()
+	close(results)
+	total := 0
+	for recordings := range results {
+		total += len(recordings)
+
+	}
+	if total != 1 { 
+		t.Fatalf("recording was claimed %d times, want 1", total)
+	}
+
+	
 }

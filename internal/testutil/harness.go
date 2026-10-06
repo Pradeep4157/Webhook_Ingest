@@ -4,6 +4,7 @@ package testutil
 import (
 	"context"
 	"io"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +49,7 @@ func IDs(t *testing.T, s *store.Store) (eventID, callID, accountID string) {
 func NewStore(t *testing.T) *store.Store {
 	t.Helper()
 	cfg := config.Load()
+	fmt.Println("TEST DATABASE URL:", cfg.PostgresDSN)
 	s, err := store.New(context.Background(), cfg.PostgresDSN, cfg.DBMaxConns)
 	if err != nil {
 		t.Fatalf("connect to postgres (is `docker compose up` running?): %v", err)
