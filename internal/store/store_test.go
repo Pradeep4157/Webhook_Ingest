@@ -121,16 +121,16 @@ func TestConcurrentPendingRecordingClaims(t *testing.T) {
 	}
 	// now i will create go routines to fetch this recording in db
 	var wg sync.WaitGroup
-	results := make(chan []store.Event, 2)
+	results := make(chan *store.Event, 2)
 
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
-			recordings, err := st.PendingRecordings(context.Background())
+			recordings, err := st.ClaimPendingRecording(context.Background())
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 				return
 			}
 			results <- recordings
@@ -141,12 +141,11 @@ func TestConcurrentPendingRecordingClaims(t *testing.T) {
 	close(results)
 	total := 0
 	for recordings := range results {
-		total += len(recordings)
-
+		if recordings != nil { 
+			total++
+		}
 	}
 	if total != 1 { 
 		t.Fatalf("recording was claimed %d times, want 1", total)
 	}
-
-	
 }

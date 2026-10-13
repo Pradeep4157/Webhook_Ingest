@@ -186,3 +186,7 @@ func (s *Store) PendingRecordings(ctx context.Context) ([]Event, error) {
 	}
 	return recordings, nil
 }
+
+func (s *Store) ClaimPendingRecording(ctx context.Context) (*Event, error){
+	return nil, nil;
+}
