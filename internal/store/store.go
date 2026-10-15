@@ -188,5 +188,40 @@ func (s *Store) PendingRecordings(ctx context.Context) ([]Event, error) {
 }
 
 func (s *Store) ClaimPendingRecording(ctx context.Context) (*Event, error){
-	return nil, nil;
+	// defining the query that we will use to lock an unprocessed event in db and 
+	// return the data of that.
+	query:= `WITH candidate AS (
+		SELECT call_id
+		FROM calls 
+		WHERE recording_url IS NOT NULL
+			AND recording_processed IS FALSE
+			AND recording_processing IS FALSE
+		ORDER BY updated_at
+		FOR UPDATE SKIP LOCKED 
+		LIMIT 1  
+	)
+	UPDATE calls 
+	SET recording_processing = TRUE,
+		recording_processing_started_at = NOW(),
+		updated_at = NOW() 
+	WHERE call_id = (SELECT call_id FROM Candidate)
+	RETURNING call_id, account_id, recording_url `
+
+	var rec Event
+	// Here we get the row data of the Event that is not processed yet.
+	err := s.pool.QueryRow(ctx, query).Scan(
+		&rec.CallID,
+		&rec.AccountID,
+		&rec.RecordingURL,
+	)
+	// If we dont get any rows, then we return nothing
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	// If we got some error while fetching the Event from db, we return that.
+	if err != nil {
+		return nil, err
+	}
+	// else we return the Pointer to the Event.
+	return &rec, nil
 }
