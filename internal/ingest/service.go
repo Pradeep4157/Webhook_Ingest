@@ -115,3 +115,40 @@ func (s *Service) RecoverPendingRecordings(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (s *Service) ProcessNextRecording(ctx context.Context) (*store.Event, error) {
+	rec, err := s.store.ClaimPendingRecording(ctx)
+	if err != nil { 
+		return nil, err
+	}
+	if rec == nil { 
+		return nil, nil
+	}
+	// now we have claimed some recording atomically from db, now we just need to process it. 
+	if err := processRecording(ctx, *rec); err != nil { 
+		return rec, err
+	}
+	return rec, nil
+}
+
+func (s *Service) Worker(ctx context.Context) {
+	for ctx.Err() == nil { 
+		rec, err := s.ProcessNextRecording(ctx) 
+		if err != nil { 
+			s.log.Error("recording processing failed", "error", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+		if rec == nil { 
+			select {
+			case <- ctx.Done():
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	}
+}
