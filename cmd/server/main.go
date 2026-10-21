@@ -15,6 +15,7 @@ import (
 	"github.com/convin/webhook-ingest/internal/redisclient"
 	"github.com/convin/webhook-ingest/internal/stats"
 	"github.com/convin/webhook-ingest/internal/store"
+	"sync"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -39,8 +40,17 @@ func main() {
 	defer func() { _ = rdb.Close() }()
 
 	svc := ingest.New(st, stats.NewCache(), rdb, log)
-	if err := svc.RecoverPendingRecordings(context.Background()); err != nil { 
-		log.Error("failed to recover pending recordings", "error", err)
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	const workerCount = 3
+	var workerWG sync.WaitGroup 
+	for i := 0; i < workerCount; i++ {
+		workerWG.Add(1)
+		go func(id int) {
+			defer workerWG.Done()
+			log.Info("recording worker started", "worker_id", id)
+			svc.Worker(workerCtx)
+			log.Info("recording worker stopped", "worker_id", id)
+		}(i + 1)
 	}
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.NewRouter(svc, log)}
 
@@ -56,12 +66,18 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
+	// now while we shutDown we need to wait for the workers to stop 
+	// as well.. 
+
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Error("shutdown", "err", err)
+		log.Error("HTTP server shutdown", "err", err)
 	}
-	log.Info("shutting down")
+
+	stopWorkers()
+	workerWG.Wait()
 	svc.Wait()
+	log.Info("Shut Down Complete")
 }
