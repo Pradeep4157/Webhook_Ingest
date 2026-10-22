@@ -77,7 +77,7 @@ func main() {
 	}
 
 	stopWorkers()
-	workerWG.Wait()
+	workerWG.Wait()	
 	svc.Wait()
 	log.Info("Shut Down Complete")
 }

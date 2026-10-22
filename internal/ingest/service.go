@@ -106,6 +106,11 @@ func (s *Service) RecoverPendingRecordings(ctx context.Context) error {
 	for _, rec := range recordings { 
 		s.log.Info("recovering recording", "call_id", rec.CallID)
 		if err := s.processRecording(ctx, rec); err != nil { 
+			// relCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second())
+			// defer cancel()
+			// if relError := s.store.ReleaseRecordingClaim(relCtx, rec.CallID); relErrr != nil {
+			// 	s.log.Error("release claim failed", "call_id", rec.CallID,  "error", relError)
+			// }
 			s.log.Error(
 				"failed to recover recording",
 				"call_id", rec.CallID,
@@ -125,7 +130,7 @@ func (s *Service) ProcessNextRecording(ctx context.Context) (*store.Event, error
 		return nil, nil
 	}
 	// now we have claimed some recording atomically from db, now we just need to process it. 
-	if err := processRecording(ctx, *rec); err != nil { 
+	if err := s.processRecording(ctx, *rec); err != nil { 
 		return rec, err
 	}
 	return rec, nil
