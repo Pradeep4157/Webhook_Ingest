@@ -42,7 +42,18 @@ func main() {
 	svc := ingest.New(st, stats.NewCache(), rdb, log)
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	const workerCount = 3
-	var workerWG sync.WaitGroup 
+	var workerWG sync.WaitGroup
+	
+	// creating WatchDog 
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		log.Info("recording WatchDog started")
+		svc.WatchDog(workerCtx)
+		log.Info("recording WatchDog stopped")
+	}
+
+	// creating workers
 	for i := 0; i < workerCount; i++ {
 		workerWG.Add(1)
 		go func(id int) {

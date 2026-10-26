@@ -229,7 +229,7 @@ func (s *Store) ClaimPendingRecording(ctx context.Context) (*Event, error){
 // WatchDog function that is going to keep checking for unprocessed records claimed by 
 // some worker which has exceeded time limit 
 
-func (s *Store) ResetStaleRecordingClass(ctx context.Context, timeOut time.Duration) (int64, error){
+func (s *Store) ResetStaleRecordingClaims(ctx context.Context, timeOut time.Duration) (int64, error){
 	result, err := s.pool.Exec(ctx, `
         UPDATE calls
         SET recording_processing = FALSE,
@@ -238,7 +238,7 @@ func (s *Store) ResetStaleRecordingClass(ctx context.Context, timeOut time.Durat
           AND recording_processed = FALSE
           AND recording_processing_started_at
               < NOW() - ($1 * INTERVAL '1 second')
-    `, timeout.Seconds())
+    `, timeOut.Seconds())
 	if err != nil { 
 		return 0, err
 	}
@@ -249,7 +249,7 @@ func (s *Store) ReleaseRecordingClaim(ctx context.Context, callID string) (error
 	result, err := s.pool.Exec(ctx, `
 		UPDATE calls
 		SET recording_processed = FALSE,
-			recording_processed_started_at = NULL
+			recording_processing_started_at = NULL,
 			updated_at = NOW()
 		WHERE call_id = $1 	
 			AND recording_processing = TRUE

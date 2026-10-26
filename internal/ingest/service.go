@@ -72,18 +72,18 @@ func (s *Service) Ingest(ctx context.Context, evt Event) error {
 
 	s.cache.Record(rec.AccountID, rec.DurationSec)
 
-	if rec.RecordingURL != "" {
-		// Detach from the request context so HTTP cancellation doesn't kill the background job
-		bgCtx := context.WithoutCancel(ctx)
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			if err := s.processRecording(bgCtx, rec); err != nil {
-				s.log.Error("failed to process recording", "event_id", rec.EventID, "error", err)
-			}
-		}()
+	// if rec.RecordingURL != "" {
+	// 	// Detach from the request context so HTTP cancellation doesn't kill the background job
+	// 	bgCtx := context.WithoutCancel(ctx)
+	// 	s.wg.Add(1)
+	// 	go func() {
+	// 		defer s.wg.Done()
+	// 		if err := s.processRecording(bgCtx, rec); err != nil {
+	// 			s.log.Error("failed to process recording", "event_id", rec.EventID, "error", err)
+	// 		}
+	// 	}()
 		
-	}
+	// }
 	return nil
 }
 
@@ -131,6 +131,15 @@ func (s *Service) ProcessNextRecording(ctx context.Context) (*store.Event, error
 	}
 	// now we have claimed some recording atomically from db, now we just need to process it. 
 	if err := s.processRecording(ctx, *rec); err != nil { 
+		// there was some error while processing the recording, 
+		// so instead of waiting for worker to fix it, we can free it now only. 
+		releaseCtx, cancel := context.WithTimeout(
+			context.Background(), 5*time.Second,
+		)
+		defer cancel()
+		if releaseError := s.store.ReleaseRecordingClaim(releaseCtx, rec.CallID); releaseError != nil { 
+			s.log.Error("failed to release recording Claim", "call_id", rec.CallID, "error", releaseError)
+		}
 		return rec, err
 	}
 	return rec, nil
@@ -153,6 +162,33 @@ func (s *Service) Worker(ctx context.Context) {
 			case <- ctx.Done():
 				return
 			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	}
+}
+
+func (s *Service) WatchDog(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	const staleTimeOut = 5 * time.Minute
+
+	for {
+		select {
+		case <- ctx.Done():
+				return
+		case <- ticker.C:
+			reclaimed, err := s.store.ReleaseStaleRecordingClaim(ctx, staleTimeOut)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				s.log.Error("WatchDog failed to reset stale recording claims", "error", err)
+				continue
+			}
+			if reclaimed > 0 {
+				s.log.Info("WatchDog reclaimed stale recording claims", "count", reclaimed)
+				
 			}
 		}
 	}
