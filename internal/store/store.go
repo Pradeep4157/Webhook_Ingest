@@ -246,9 +246,9 @@ func (s *Store) ResetStaleRecordingClaims(ctx context.Context, timeOut time.Dura
 }
 
 func (s *Store) ReleaseRecordingClaim(ctx context.Context, callID string) (error){
-	result, err := s.pool.Exec(ctx, `
+	_, err := s.pool.Exec(ctx, `
 		UPDATE calls
-		SET recording_processed = FALSE,
+		SET recording_processing = FALSE,
 			recording_processing_started_at = NULL,
 			updated_at = NOW()
 		WHERE call_id = $1 	

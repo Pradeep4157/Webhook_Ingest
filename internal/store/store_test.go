@@ -3,9 +3,10 @@ package store_test
 import (
 	"context"
 	"testing"
+	"sync"
+	"time"
 	"github.com/convin/webhook-ingest/internal/store"
 	"github.com/convin/webhook-ingest/internal/testutil"
-	"sync"
 )
 
 func TestIngestEventThenExists(t *testing.T) {
@@ -147,5 +148,55 @@ func TestConcurrentPendingRecordingClaims(t *testing.T) {
 	}
 	if total != 1 { 
 		t.Fatalf("recording was claimed %d times, want 1", total)
+	}
+}
+
+func TestResetStaleRecordingClaims(t *testing.T) {
+	ctx := context.Background()
+	s := testutil.NewStore(t)
+	pool := s.Pool()
+	ids := []string {"stale-call", "recent-call", "processed-call"}
+	// Cleaning db if there are same rows in the db already
+	clean := func() {
+		t.Helper()
+		_, _ = pool.Exec(ctx, `DELETE FROM calls where call_id = ANY($1)`, ids)
+	}
+	clean()
+	t.Cleanup(clean)
+	// Function for inserting calls in db. 
+	insert := func(callID string, processed bool, age string) {
+		t.Helper()
+		_, err := pool.Exec(context.Background(), ` INSERT INTO calls (call_id, account_id, status, duration_sec, recording_url, recording_processed, recording_processing, 
+		recording_processing_started_at) VALUES ($1, 'account-1', 'completed', 100, 'https://example.com/x.mp3', $2, TRUE, NOW() - $3::interval)`, callID, processed, age)
+		if err != nil {
+			t.Fatalf("insert %s : %v", callID, err)
+		}
+	}
+	insert("stale-call", false, "10 minutes")
+	insert("recent-call", false, "1 minute")
+	insert("processed-call", true, "10 minutes")
+	n, err := s.ResetStaleRecordingClaims(ctx, 5 * time.Minute)
+	if err != nil {
+		t.Fatalf("reset %v: ", err)
+	}
+	if n != 1{ 
+		t.Fatalf("reclaimed %d, want 1", n)
+	}
+	// now we verify whether the stale are actually reset and recent call should have been processed 
+	processing := func(callID string) bool{
+		var v bool 
+		if err := pool.QueryRow(ctx, `SELECT recording_processing FROM calls WHERE call_id = $1`, callID).Scan(&v); err != nil {
+			t.Fatalf("Scan %s %v", callID, err)
+		}
+		return v
+	}
+	if processing("stale-call") {
+		t.Error("stale-call should have been released")
+	}
+	if !processing("recent-call") {
+		t.Error("recent call should still be claimed")
+	}
+	if !processing("processed-call") {
+		t.Error("processed call should have been untouched")
 	}
 }

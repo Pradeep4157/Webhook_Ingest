@@ -178,7 +178,7 @@ func (s *Service) WatchDog(ctx context.Context) {
 		case <- ctx.Done():
 				return
 		case <- ticker.C:
-			reclaimed, err := s.store.ReleaseStaleRecordingClaim(ctx, staleTimeOut)
+			reclaimed, err := s.store.ResetStaleRecordingClaims(ctx, staleTimeOut)
 			if err != nil {
 				if ctx.Err() != nil {
 					return

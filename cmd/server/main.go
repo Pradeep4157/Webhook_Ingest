@@ -51,7 +51,7 @@ func main() {
 		log.Info("recording WatchDog started")
 		svc.WatchDog(workerCtx)
 		log.Info("recording WatchDog stopped")
-	}
+	}()
 
 	// creating workers
 	for i := 0; i < workerCount; i++ {
