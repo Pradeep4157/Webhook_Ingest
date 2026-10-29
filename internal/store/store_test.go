@@ -200,3 +200,51 @@ func TestResetStaleRecordingClaims(t *testing.T) {
 		t.Error("processed call should have been untouched")
 	}
 }
+
+
+func TestClaimPendingRecordingMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+	s := testutil.NewStore(t)
+	pool := s.Pool()
+	callID := "max-attempts-call"
+
+	clean := func() {
+		t.Helper()
+		_, _ = pool.Exec(ctx, `DELETE FROM calls WHERE call_id = $1`, callID)
+	}
+	clean()
+	t.Cleanup(clean)
+
+	_, err := pool.Exec(ctx, `INSERT INTO calls (call_id, account_id, status, duration_sec, recording_url, recording_processed, recording_processing, recording_attempts)
+				VALUES ($1, 'account-1', 'completed', 100, 'https://example.com/x.mp3', FALSE, FALSE, 4)`, callID)
+	if err != nil { 
+		t.Fatalf("insert call : %v", err)
+	}
+	rec, err := s.ClaimPendingRecording(ctx) 
+	if err != nil {
+		t.Fatalf("claim fifth attempt : %v", err)
+	}
+	if rec == nil { 
+		t.Fatal("expected recording to be claimed on fifth attempt")
+	}
+	var attempts int
+	err = pool.QueryRow(ctx, 
+			`SELECT recording_attempts FROM calls WHERE call_id = $1`, callID).Scan(&attempts)
+	if err != nil { 
+		t.Fatalf("reading attempts : %v", err) 
+	}
+	if attempts != 5 {
+		t.Fatalf("attempts = %d, want = 5", attempts)
+	}
+	err = s.ReleaseRecordingClaim(ctx, callID)
+	if err != nil {
+		t.Fatalf("release claim %v", err)
+	}
+	rec, err = s.ClaimPendingRecording(ctx)
+	if err != nil { 
+		t.Fatalf("claim after max attempts : %v", err)
+	}
+	if rec != nil { 
+		t.Fatalf("expected no recording after max attempts, got %q", rec.CallID)
+	}
+}

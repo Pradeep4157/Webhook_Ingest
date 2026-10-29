@@ -127,7 +127,10 @@ func upsertCall(ctx context.Context, db dbtx, e Event) error {
 // MarkRecordingProcessed flags the call's recording as handled.
 func (s *Store) MarkRecordingProcessed(ctx context.Context, callID string) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE calls SET recording_processed = TRUE, updated_at = now()
+		`UPDATE calls SET recording_processed = TRUE,
+				recording_processing = FALSE, 
+				recording_processing_started_at = NULL, 
+				updated_at = now()
 		 WHERE call_id = $1`, callID)
 	return err
 }
@@ -196,6 +199,7 @@ func (s *Store) ClaimPendingRecording(ctx context.Context) (*Event, error){
 		WHERE recording_url IS NOT NULL
 			AND recording_processed IS FALSE
 			AND recording_processing IS FALSE
+			AND recording_attempts < 5
 		ORDER BY updated_at
 		FOR UPDATE SKIP LOCKED 
 		LIMIT 1  
@@ -203,6 +207,7 @@ func (s *Store) ClaimPendingRecording(ctx context.Context) (*Event, error){
 	UPDATE calls 
 	SET recording_processing = TRUE,
 		recording_processing_started_at = NOW(),
+		recording_attempts = recording_attempts + 1,
 		updated_at = NOW() 
 	WHERE call_id = (SELECT call_id FROM Candidate)
 	RETURNING call_id, account_id, recording_url `
